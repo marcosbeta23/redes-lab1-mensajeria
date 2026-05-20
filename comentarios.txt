@@ -1,0 +1,23 @@
+# comentarios.txt
+# Redes de Computadoras - Laboratorio 1
+#
+# Integrantes:
+# CI: X.XXX.XXX-X - Nombre Apellido
+# CI: X.XXX.XXX-X - Nombre Apellido
+# CI: X.XXX.XXX-X - Nombre Apellido
+# CI: X.XXX.XXX-X - Nombre Apellido
+#
+# Descripcion de la solucion:
+# [completar antes de la entrega]
+#
+# Que funciona:
+# [completar]
+#
+# Que no funciona o esta incompleto:
+# [completar]
+#
+# Decisiones de diseno:
+# [completar]
+#
+# Como probar:
+# [completar]
