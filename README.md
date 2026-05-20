@@ -1,7 +1,7 @@
 # Redes de Computadoras — Laboratorio 1
 ## Mensajería con Sockets TCP/UDP
 
-**UTEC — Tecnólogo en Informática — 2026**
+**Tecnólogo en Informática — 2026**
 
 ---
 
