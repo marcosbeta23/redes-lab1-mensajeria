@@ -28,6 +28,7 @@ import threading
 
 
 MAX_LARGO_MENSAJE = 255
+_running = True
 
 # Protocolo (TCP), formato de los mensajes que mandamos y recibimos:
 # MSG <usuario> <ip_emisor> <largo_mensaje>\r\n
@@ -132,8 +133,36 @@ def handle_client(client_socket, client_addr):
 
         # ── FILE <usuario> <ip_emisor> <nombre_archivo> <tamano> ────────────
         elif tipo == "FILE" and len(partes) == 5:
-            # TODO: implementar recepcion de archivos
-            pass
+            usuario = partes[1]
+            ip_emisor = partes[2]
+            nombre_archivo = os.path.basename(partes[3])
+
+            try:
+                tamano = int(partes[4])
+            except ValueError:
+                print(f"[{ts}] {ip_emisor} <Error Recibiendo Archivo de {usuario}>", flush=True)
+                return
+
+            if tamano < 0 or nombre_archivo == "":
+                print(f"[{ts}] {ip_emisor} <Error Recibiendo Archivo de {usuario}>", flush=True)
+                return
+
+            datos_archivo = recv_bytes(client_socket, tamano)
+
+            ruta_salida = f"./{nombre_archivo}"
+
+            if datos_archivo is None:
+                print(f"[{ts}] {ip_emisor} <Error Recibiendo Archivo de {usuario}>", flush=True)
+                return
+
+            try:
+                with open(ruta_salida, "wb") as archivo:
+                    archivo.write(datos_archivo)
+
+                print(f"[{ts}] {ip_emisor} <Recibido {ruta_salida} de {usuario}>", flush=True)
+
+            except OSError:
+                print(f"[{ts}] {ip_emisor} <Error Recibiendo Archivo de {usuario}>", flush=True)
 
         # Si el tipo no es MSG ni FILE, ignoramos la conexion
 
