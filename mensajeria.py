@@ -102,6 +102,10 @@ def autenticar(ip_auth, port_auth):
 
 # MODULO B — RECEPTOR
 
+def _ts():
+    """Timestamp: YYYY.MM.DD HH:MM"""
+    return datetime.datetime.now().strftime("%Y.%m.%d %H:%M")
+
 def handle_client(client_socket, client_addr):
     """Procesa una unica conexion entrante (MSG o FILE).
     Corre en un hilo separado por cada conexion."""
@@ -112,7 +116,6 @@ def handle_client(client_socket, client_addr):
 
         partes = header.split()
         tipo   = partes[0] if partes else ""
-        ts     = datetime.datetime.now().strftime("%Y.%m.%d %H:%M")
 
         # ── MSG <usuario> <ip_emisor> <largo> ───────────────────────────────
         if tipo == "MSG" and len(partes) == 4:
@@ -129,7 +132,7 @@ def handle_client(client_socket, client_addr):
 
             mensaje = data.decode("utf-8", errors="replace")
             # [2026.06.23 17:02] 192.168.33.15 nwirth dice: Feliz Cumple!!!!!
-            print(f"[{ts}] {ip_emisor} {usuario} dice: {mensaje}", flush=True)
+            print(f"[{_ts}] {ip_emisor} {usuario} dice: {mensaje}", flush=True)
 
         # ── FILE <usuario> <ip_emisor> <nombre_archivo> <tamano> ────────────
         elif tipo == "FILE" and len(partes) == 5:
@@ -140,11 +143,11 @@ def handle_client(client_socket, client_addr):
             try:
                 tamano = int(partes[4])
             except ValueError:
-                print(f"[{ts}] {ip_emisor} <Error Recibiendo Archivo de {usuario}>", flush=True)
+                print(f"[{_ts}] {ip_emisor} <Error Recibiendo Archivo de {usuario}>", flush=True)
                 return
 
             if tamano < 0 or nombre_archivo == "":
-                print(f"[{ts}] {ip_emisor} <Error Recibiendo Archivo de {usuario}>", flush=True)
+                print(f"[{_ts}] {ip_emisor} <Error Recibiendo Archivo de {usuario}>", flush=True)
                 return
 
             datos_archivo = recv_bytes(client_socket, tamano)
@@ -152,17 +155,17 @@ def handle_client(client_socket, client_addr):
             ruta_salida = f"./{nombre_archivo}"
 
             if datos_archivo is None:
-                print(f"[{ts}] {ip_emisor} <Error Recibiendo Archivo de {usuario}>", flush=True)
+                print(f"[{_ts}] {ip_emisor} <Error Recibiendo Archivo de {usuario}>", flush=True)
                 return
 
             try:
                 with open(ruta_salida, "wb") as archivo:
                     archivo.write(datos_archivo)
 
-                print(f"[{ts}] {ip_emisor} <Recibido {ruta_salida} de {usuario}>", flush=True)
+                print(f"[{_ts}] {ip_emisor} <Recibido {ruta_salida} de {usuario}>", flush=True)
 
             except OSError:
-                print(f"[{ts}] {ip_emisor} <Error Recibiendo Archivo de {usuario}>", flush=True)
+                print(f"[{_ts}] {ip_emisor} <Error Recibiendo Archivo de {usuario}>", flush=True)
 
         # Si el tipo no es MSG ni FILE, ignoramos la conexion
 
@@ -257,8 +260,39 @@ def enviar_mensaje_texto(destino, port_destino, usuario, mensaje):
         print(f"Error enviando mensaje a {destino}: {e}")
 
 def enviar_archivo(destino, port_destino, usuario, path_archivo):
-    # TODO: implementar envio de archivos
-    pass
+    """Envia un archivo por TCP al destino indicado."""
+    if not os.path.isfile(path_archivo):
+        print(f"Error: el archivo {path_archivo} no existe")
+        return
+    
+    try:
+        with open(path_archivo, "rb") as f:
+            datos = f.read()
+    except OSError as e:
+        print(f"Error leyendo el archivo {path_archivo}: {e}")
+        return
+    
+    nombre_base = os.path.basename(path_archivo)
+    tamano = len(datos)
+
+    ip_destino = resolver_destino(destino)
+    if ip_destino is None:
+        return
+    
+    ip_emisor = obtener_ip_local(ip_destino, port_destino)
+    header = f"FILE {usuario} {ip_emisor} {nombre_base} {tamano}\r\n".encode("utf-8")
+
+    try:
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+            s.settimeout(10)
+            s.connect((ip_destino, port_destino))
+            s.sendall(header + datos)
+    except ConnectionRefusedError:
+        print(f"Error: conexion rechazada por {destino}:{port_destino}")
+    except (socket.timeout, TimeoutError):
+        print(f"Error: tiempo de conexion agotado con {destino}:{port_destino}")
+    except OSError as e:
+        print(f"Error enviando mensaje a {destino}: {e}")
 
 def bucle_emisor(port_destino, usuario):
     """Lee lo que escribe el usuario y lo manda al destino.
