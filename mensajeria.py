@@ -22,6 +22,7 @@ import datetime
 import getpass
 import hashlib
 import os
+import signal
 import socket
 import sys
 import threading
@@ -132,7 +133,7 @@ def handle_client(client_socket, client_addr):
 
             mensaje = data.decode("utf-8", errors="replace")
             # [2026.06.23 17:02] 192.168.33.15 nwirth dice: Feliz Cumple!!!!!
-            print(f"[{_ts}] {ip_emisor} {usuario} dice: {mensaje}", flush=True)
+            print(f"[{_ts()}] {ip_emisor} {usuario} dice: {mensaje}", flush=True)
 
         # ── FILE <usuario> <ip_emisor> <nombre_archivo> <tamano> ────────────
         elif tipo == "FILE" and len(partes) == 5:
@@ -143,11 +144,11 @@ def handle_client(client_socket, client_addr):
             try:
                 tamano = int(partes[4])
             except ValueError:
-                print(f"[{_ts}] {ip_emisor} <Error Recibiendo Archivo de {usuario}>", flush=True)
+                print(f"[{_ts()}] {ip_emisor} <Error Recibiendo Archivo de {usuario}>", flush=True)
                 return
 
             if tamano < 0 or nombre_archivo == "":
-                print(f"[{_ts}] {ip_emisor} <Error Recibiendo Archivo de {usuario}>", flush=True)
+                print(f"[{_ts()}] {ip_emisor} <Error Recibiendo Archivo de {usuario}>", flush=True)
                 return
 
             datos_archivo = recv_bytes(client_socket, tamano)
@@ -155,17 +156,17 @@ def handle_client(client_socket, client_addr):
             ruta_salida = f"./{nombre_archivo}"
 
             if datos_archivo is None:
-                print(f"[{_ts}] {ip_emisor} <Error Recibiendo Archivo de {usuario}>", flush=True)
+                print(f"[{_ts()}] {ip_emisor} <Error Recibiendo Archivo de {usuario}>", flush=True)
                 return
 
             try:
                 with open(ruta_salida, "wb") as archivo:
                     archivo.write(datos_archivo)
 
-                print(f"[{_ts}] {ip_emisor} <Recibido {ruta_salida} de {usuario}>", flush=True)
+                print(f"[{_ts()}] {ip_emisor} <Recibido {ruta_salida} de {usuario}>", flush=True)
 
             except OSError:
-                print(f"[{_ts}] {ip_emisor} <Error Recibiendo Archivo de {usuario}>", flush=True)
+                print(f"[{_ts()}] {ip_emisor} <Error Recibiendo Archivo de {usuario}>", flush=True)
 
         # Si el tipo no es MSG ni FILE, ignoramos la conexion
 
@@ -204,6 +205,81 @@ def bucle_receptor(port):
     except OSError:
         pass
 
+def _procesar_udp(header_str, payload, ip_fuente):
+    """Procesa un datagrama UDP de broadcast (mismo protocolo que TCP)."""
+    partes = header_str.split()
+    tipo   = partes[0] if partes else ""
+ 
+    # ── MSG ────────────────────────────────────────────────────────────────
+    if tipo == "MSG" and len(partes) == 4:
+        usuario   = partes[1]
+        ip_emisor = partes[2]
+        try:
+            largo = int(partes[3])
+        except ValueError:
+            return
+        mensaje = payload[:largo].decode("utf-8", errors="replace")
+        print(f"[{_ts()}] {ip_emisor} {usuario} dice: {mensaje}", flush=True)
+ 
+    # ── FILE ───────────────────────────────────────────────────────────────
+    elif tipo == "FILE" and len(partes) == 5:
+        usuario        = partes[1]
+        ip_emisor      = partes[2]
+        nombre_archivo = os.path.basename(partes[3])
+        try:
+            tamano = int(partes[4])
+        except ValueError:
+            print(f"[{_ts()}] {ip_emisor} <Error Recibiendo Archivo de {usuario}>", flush=True)
+            return
+ 
+        datos = payload[:tamano]
+        if len(datos) == tamano and nombre_archivo:
+            try:
+                with open(f"./{nombre_archivo}", "wb") as f:
+                    f.write(datos)
+                print(f"[{_ts()}] {ip_emisor} <Recibido ./{nombre_archivo} de {usuario}>", flush=True)
+            except OSError:
+                print(f"[{_ts()}] {ip_emisor} <Error Recibiendo Archivo de {usuario}>", flush=True)
+        else:
+            print(f"[{_ts()}] {ip_emisor} <Error Recibiendo Archivo de {usuario}>", flush=True)
+ 
+ 
+def bucle_receptor_udp(port):
+    """Escucha datagramas UDP de broadcast en 0.0.0.0:port."""
+    try:
+        srv = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        srv.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        srv.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
+        srv.bind(("0.0.0.0", port))
+        srv.settimeout(1.0)
+    except OSError as e:
+        print(f"Error iniciando receptor UDP: {e}", flush=True)
+        return
+
+    while _running:
+        try:
+            data, addr = srv.recvfrom(65535)
+            # Separar header (\r\n) 
+            idx = data.find(b"\r\n")
+            if idx == -1:
+                continue
+            try:
+                header_str = data[:idx].decode("utf-8")
+            except UnicodeDecodeError:
+                continue
+            payload = data[idx + 2:]
+            _procesar_udp(header_str, payload, addr[0])
+        except socket.timeout:
+            continue
+        except OSError:
+            break
+
+    try:
+        srv.close()
+    except OSError:
+        pass
+
+
 # MODULO C — EMISOR
 
 def obtener_ip_local(ip_destino, port_destino):
@@ -218,6 +294,18 @@ def obtener_ip_local(ip_destino, port_destino):
             return socket.gethostbyname(socket.gethostname())
         except OSError:
             return "0.0.0.0"
+
+def obtener_broadcast():
+    """
+    Calcula la direccion de broadcast de la interfaz principal.
+    Asume mascara /24 (la mas comun en labs). Si falla, usa 255.255.255.255.
+    """
+    try:
+        ip_local = obtener_ip_local("8.8.8.8", 80)
+        # Para /24: reemplazar ultimo octeto con 255
+        return ip_local.rsplit(".", 1)[0] + ".255"
+    except Exception:
+        return "255.255.255.255"
 
 def resolver_destino(destino):
     """Convierte un nombre de host o IP en una IP numerica.
@@ -294,6 +382,56 @@ def enviar_archivo(destino, port_destino, usuario, path_archivo):
     except OSError as e:
         print(f"Error enviando mensaje a {destino}: {e}")
 
+def _enviar_udp_broadcast(port, payload_bytes):
+    """Envia un datagrama UDP a la direccion de broadcast de la red local."""
+    ip_bcast = obtener_broadcast()
+    try:
+        with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as s:
+            s.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
+            s.sendto(payload_bytes, (ip_bcast, port))
+    except OSError as e:
+        print(f"Error en broadcast: {e}")
+ 
+ 
+def broadcast_mensaje(port, usuario, mensaje):
+    """Envia un mensaje de texto a todos los hosts de la red via UDP broadcast."""
+    mensaje_bytes = mensaje.encode("utf-8")
+    largo = len(mensaje_bytes)
+ 
+    if largo > MAX_LARGO_MENSAJE:
+        print(f"Error: el mensaje supera el largo maximo de {MAX_LARGO_MENSAJE} bytes")
+        return
+ 
+    ip_emisor = obtener_ip_local("8.8.8.8", 80)
+    header    = f"MSG {usuario} {ip_emisor} {largo}\r\n".encode("utf-8")
+    _enviar_udp_broadcast(port, header + mensaje_bytes)
+ 
+ 
+def broadcast_archivo(port, usuario, path_archivo):
+    """Envia un archivo a todos los hosts de la red via UDP broadcast.
+    Limitado al tamano maximo de un datagrama UDP (~65 KB)."""
+    if not os.path.isfile(path_archivo):
+        print(f"Error: no existe el archivo '{path_archivo}'")
+        return
+ 
+    try:
+        with open(path_archivo, "rb") as f:
+            datos = f.read()
+    except OSError as e:
+        print(f"Error leyendo archivo '{path_archivo}': {e}")
+        return
+ 
+    if len(datos) > 65000:
+        print("Error: archivo demasiado grande para broadcast UDP (maximo ~65 KB)")
+        return
+ 
+    nombre_base = os.path.basename(path_archivo)
+    tamano      = len(datos)
+    ip_emisor   = obtener_ip_local("8.8.8.8", 80)
+    header      = f"FILE {usuario} {ip_emisor} {nombre_base} {tamano}\r\n".encode("utf-8")
+    _enviar_udp_broadcast(port, header + datos)
+
+
 def bucle_emisor(port_destino, usuario):
     """Lee lo que escribe el usuario y lo manda al destino.
     El formato de entrada es:
@@ -304,33 +442,58 @@ def bucle_emisor(port_destino, usuario):
     while True:
         try:
             linea = input()
-
+ 
             if linea.strip() == "":
                 continue
-
+ 
             partes = linea.split(" ", 1)
-
+ 
             if len(partes) != 2:
-                print("Formato invalido. Use: destino mensaje")
+                print("Formato invalido. Use: destino mensaje  o  destino &file path")
                 continue
-
-            destino = partes[0].strip()
-            mensaje = partes[1]
-
-            if mensaje.strip() == "":
-                print("Error: el mensaje no puede estar vacio")
-                continue
-
-            enviar_mensaje_texto(destino, port_destino, usuario, mensaje)
-
+ 
+            destino  = partes[0].strip()
+            contenido = partes[1]
+ 
+            # Detectar si es envio de archivo
+            es_archivo = contenido.startswith("&file ")
+            if es_archivo:
+                path = contenido[6:].strip()
+                if not path:
+                    print("Error: especifica el path del archivo")
+                    continue
+            else:
+                mensaje = contenido
+                if not mensaje.strip():
+                    print("Error: el mensaje no puede estar vacio")
+                    continue
+ 
+            # Despachar segun destino
+            if destino == "*":
+                if es_archivo:
+                    broadcast_archivo(port_destino, usuario, path)
+                else:
+                    broadcast_mensaje(port_destino, usuario, mensaje)
+            else:
+                if es_archivo:
+                    enviar_archivo(destino, port_destino, usuario, path)
+                else:
+                    enviar_mensaje_texto(destino, port_destino, usuario, mensaje)
+ 
         except KeyboardInterrupt:
-            # TODO (modulo E - senales): el manejador de senal se tiene que ocupar de esto
+            # La senal SIGINT ya fue registrada — simplemente ignorar aqui
             pass
         except EOFError:
             sys.exit(0)
 
 # MODULO E — SENALES Y CIERRE LIMPIO
-# TODO (modulo E): implementar manejador de senales
+
+def _cerrar(sig, frame):
+    """Manejador de SIGINT y SIGTERM. Imprime el mensaje del enunciado y sale."""
+    global _running
+    _running = False
+    print("\nCTRL + C Recibido.... Cerrando Sesion", flush=True)
+    sys.exit(0)
 
 # MAIN
 
@@ -343,7 +506,9 @@ def main():
     ip_auth = sys.argv[2]
     port_auth = int(sys.argv[3])
 
-    # TODO (modulo E): registrar signal.signal(SIGINT) y signal.signal(SIGTERM)
+    # Registrar senales antes de arrancar hilos
+    signal.signal(signal.SIGINT,  _cerrar)
+    signal.signal(signal.SIGTERM, _cerrar)
 
     usuario = autenticar(ip_auth, port_auth)
 
@@ -351,13 +516,17 @@ def main():
         print("Error: no se pudo autenticar el usuario")
         sys.exit(1)
 
-    # Receptor en hilo separado
-    hilo_rx = threading.Thread(target=bucle_receptor, args=(port,), daemon=True)
-    hilo_rx.start()
-
-    # Emisor en hilo principal
+    # Receptor TCP (unicast) en hilo separado
+    hilo_tcp = threading.Thread(target=bucle_receptor, args=(port,), daemon=True)
+    hilo_tcp.start()
+ 
+    # Receptor UDP (broadcast) en hilo separado
+    hilo_udp = threading.Thread(target=bucle_receptor_udp, args=(port,), daemon=True)
+    hilo_udp.start()
+ 
+    # Emisor en el hilo principal (bloquea en input())
     bucle_emisor(port, usuario)
-
-
+ 
+ 
 if __name__ == "__main__":
     main()
