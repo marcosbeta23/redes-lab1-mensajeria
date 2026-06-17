@@ -1,9 +1,9 @@
 # Redes de Computadoras - Lab 1
 # Integrantes:
-# CI: X.XXX.XXX-X - Nombre Apellido
-# CI: X.XXX.XXX-X - Nombre Apellido
-# CI: X.XXX.XXX-X - Nombre Apellido
-# CI: X.XXX.XXX-X - Nombre Apellido
+# CI: 5.597.183-2 - Joaquin Pintos
+# CI: 5.470.443-0 - Marcos Betancor
+# CI: 5.363.039-9 - Gaston Groso
+# CI: 5.453.743-7 - Santiago Bove
 
 """
 mensajeria.py - Aplicacion de mensajeria con sockets TCP
@@ -125,6 +125,9 @@ def handle_client(client_socket, client_addr):
             try:
                 largo = int(partes[3])
             except ValueError:
+                return
+
+            if largo < 0 or largo > MAX_LARGO_MENSAJE:
                 return
 
             data = recv_bytes(client_socket, largo)

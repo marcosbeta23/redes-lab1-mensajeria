@@ -2,22 +2,89 @@
 # Redes de Computadoras - Laboratorio 1
 #
 # Integrantes:
-# CI: X.XXX.XXX-X - Nombre Apellido
-# CI: X.XXX.XXX-X - Nombre Apellido
-# CI: X.XXX.XXX-X - Nombre Apellido
-# CI: X.XXX.XXX-X - Nombre Apellido
+# CI: 5.597.183-2 - Joaquin Pintos
+# CI: 5.470.443-0 - Marcos Betancor
+# CI: 5.363.039-9 - Gaston Groso
+# CI: 5.453.743-7 - Santiago Bove
 #
 # Descripcion de la solucion:
-# [completar antes de la entrega]
+# Se implemento una aplicacion de mensajeria en Python utilizando sockets. El programa se ejecuta indicando el puerto local de recepcion y los datos del servidor de autenticacion. Al iniciar, el usuario debe autenticarse contra el servidor redes-auth mediante TCP, enviando las credenciales en el formato usuario-md5(clave) y respetando los finales de linea CRLF.
+#
+# Luego de autenticarse correctamente, el programa levanta un receptor TCP en un hilo separado para recibir mensajes y archivos de otros pares, mientras que el hilo principal queda leyendo entradas del usuario desde stdin para enviar mensajes o archivos. Cada conexion entrante se procesa en un hilo independiente, permitiendo atender multiples conexiones sin bloquear el funcionamiento general del programa.
+#
+# La comunicacion entre pares utiliza un protocolo propio con cabecera terminada en CRLF. Para mensajes de texto se usa el formato MSG <usuario> <ip_emisor> <largo_mensaje>\r\n seguido exactamente por los bytes del mensaje. Para archivos se usa FILE <usuario> <ip_emisor> <nombre_archivo> <tamano_bytes>\r\n seguido exactamente por los bytes del archivo. De esta forma, el receptor sabe cuantos bytes debe leer y no depende de un unico recv().
 #
 # Que funciona:
-# [completar]
+# - Autenticacion TCP contra el servidor redes-auth.
+# - Lectura de usuario y clave, codificando la clave en MD5.
+# - Recepcion continua de mensajes mediante un socket TCP.
+# - Envio de mensajes de texto a una IP o nombre de host.
+# - Resolucion de nombres de host usando socket.gethostbyname().
+# - Validacion del largo maximo de mensajes de texto: 255 bytes.
+# - Recepcion y guardado de archivos en el directorio actual.
+# - Envio de archivos usando el comando &file.
+# - Lectura exacta de la cantidad de bytes indicada en la cabecera, tanto para mensajes como para archivos.
+# - Manejo de multiples conexiones entrantes mediante hilos.
+# - Broadcast usando el destino "*".
+# - Manejo de SIGINT y SIGTERM para cerrar el programa de forma controlada.
 #
 # Que no funciona o esta incompleto:
-# [completar]
+# - SIGKILL no puede ser capturada por el programa, ya que el sistema operativo no permite manejar esa senal.
+# - El broadcast de archivos se implementa mediante UDP y esta pensado para archivos pequenos. Se limita a aproximadamente 65 KB debido al tamano maximo practico de un datagrama UDP.
+# - La direccion de broadcast se calcula asumiendo una red /24, reemplazando el ultimo octeto de la IP local por 255. En redes con otra mascara podria requerir ajustes.
 #
 # Decisiones de diseno:
-# [completar]
+# - Se utilizo threading en lugar de bifurcacion de procesos para mantener una unica aplicacion simple y permitir que el receptor funcione en paralelo con el emisor.
+# - Los envios directos a IP o nombre de host se realizan por TCP, ya que este protocolo permite una comunicacion confiable y ordenada para mensajes y archivos.
+# - El receptor TCP escucha en 0.0.0.0 y en el puerto indicado por argumento, aceptando conexiones desde cualquier interfaz de red disponible.
+# - Cada conexion aceptada por el receptor TCP se atiende en un hilo separado, evitando que una transferencia bloquee la recepcion de otras conexiones.
+# - Para evitar problemas propios de TCP, donde un recv() no garantiza recibir todos los bytes esperados, se implemento la funcion recv_bytes(), que lee en bucle hasta completar la cantidad indicada.
+# - Los archivos se abren y guardan en modo binario para evitar corrupcion de imagenes, PDFs u otros archivos no textuales.
+# - Para el destino "*" se implemento broadcast mediante UDP, reutilizando el mismo formato de cabecera y payload. Por eso el programa levanta tambien un receptor UDP en el mismo puerto.
+# - Para obtener la IP local del emisor se utiliza un socket UDP auxiliar. Este socket no envia informacion del protocolo, solo permite consultar que direccion IP local usaria el sistema para comunicarse con el destino.
+# - Para los nombres de archivos recibidos se utiliza os.path.basename(), evitando guardar rutas completas o escribir fuera del directorio actual.
 #
 # Como probar:
-# [completar]
+# 1. Ejecutar el servidor de autenticacion:
+#    ./redes-auth <puerto>
+#
+#    O utilizar el servidor de prueba indicado por el docente, por ejemplo:
+#    ti.esi.edu.uy 33
+#
+# 2. Ejecutar una instancia del programa:
+#    python mensajeria.py 22764 ti.esi.edu.uy 33
+#
+# 3. Ingresar un usuario valido, por ejemplo:
+#    Usuario: aturing
+#    Clave: aturing
+#
+# 4. Para probar un mensaje a uno mismo:
+#    localhost Hola prueba
+#
+#    La salida esperada es similar a:
+#    [YYYY.MM.DD HH:MM] 127.0.0.1 aturing dice: Hola prueba
+#
+# 5. Para probar mensajes entre dos equipos, ejecutar el programa en ambos con el mismo puerto y enviar desde uno hacia la IP o nombre de host del otro:
+#    192.168.1.20 Hola desde otro equipo
+#
+# 6. Para probar envio de archivos:
+#    localhost &file prueba.txt
+#
+#    La salida esperada es similar a:
+#    [YYYY.MM.DD HH:MM] 127.0.0.1 <Recibido ./prueba.txt de aturing>
+#
+# 7. Para verificar integridad de archivos en Windows:
+#    CertUtil -hashfile .\prueba.txt MD5
+#
+#    En Linux:
+#    md5sum prueba.txt
+#
+# 8. Para probar broadcast de mensajes:
+#    * Hola a todos
+#
+# 9. Para probar broadcast de archivos pequenos:
+#    * &file prueba.txt
+#
+# 10. Para probar el cierre limpio:
+#    Presionar CTRL + C y verificar que se imprima:
+#    CTRL + C Recibido.... Cerrando Sesión
